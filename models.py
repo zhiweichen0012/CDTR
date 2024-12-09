@@ -17,17 +17,15 @@ import sba_util
 import att_CNN
 
 __all__ = [
-    "deit_small_patch16_224_SDTR_cub",
-    "deit_small_patch16_224_SDTR_imnet",
+    "deit_small_patch16_224_CDTR_cub",
+    "deit_small_patch16_224_CDTR_imnet",
 ]
 
 
-class SDTR_cub(VisionTransformer):
+class CDTR_cub(VisionTransformer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.head = nn.Conv2d(
-            self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1
-        )
+        self.head = nn.Conv2d(self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
 
         self.avgpool = nn.AdaptiveAvgPool2d(1)
         self.att_layer = att_CNN.cnn(
@@ -35,9 +33,7 @@ class SDTR_cub(VisionTransformer):
             self.num_classes,
             c_base=8,
         )
-        self.att_cls = nn.Conv2d(
-            self.num_classes, self.num_classes, kernel_size=1, padding=0, bias=False
-        )
+        self.att_cls = nn.Conv2d(self.num_classes, self.num_classes, kernel_size=1, padding=0, bias=False)
 
         self.dnc_att_layer = sba_util.sba_module(
             in_channels=self.num_classes,
@@ -107,9 +103,7 @@ class SDTR_cub(VisionTransformer):
         B = x.shape[0]
         x = self.patch_embed(x)
 
-        cls_tokens = self.cls_token.expand(
-            B, -1, -1
-        )  # stole cls_tokens impl from Phil Wang, thanks
+        cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         x = torch.cat((cls_tokens, x), dim=1)
         x = x + self.pos_embed
         x = self.pos_drop(x)
@@ -131,7 +125,7 @@ class SDTR_cub(VisionTransformer):
         self.attn_map = self.attn_map.sum(1)[:, 0, 1:].reshape([-1, 14, 14])
 
         n, p, c = x_patch.shape
-        x_patch = torch.reshape(x_patch, [n, int(p ** 0.5), int(p ** 0.5), c])
+        x_patch = torch.reshape(x_patch, [n, int(p**0.5), int(p**0.5), c])
         x_patch = x_patch.permute([0, 3, 1, 2])
         x_patch = x_patch.contiguous()
         x_patch = self.head(x_patch)
@@ -142,7 +136,7 @@ class SDTR_cub(VisionTransformer):
         attn_weights_c_merge = rearrange(
             attn_weights_c[..., 0, 1:],
             "h b m (hi wi) -> b (h m) hi wi",
-            hi=int(p ** 0.5),
+            hi=int(p**0.5),
         )  # [128 72 14 14]
         attn_out1 = self.att_layer(attn_weights_c_merge)
         attn_out2 = self.att_cls(attn_out1)
@@ -151,7 +145,7 @@ class SDTR_cub(VisionTransformer):
         attn_weights_c_head = rearrange(
             attn_weights_c[..., 0, 1:],
             "h b m (hi wi) ->h b m hi wi",
-            hi=int(p ** 0.5),
+            hi=int(p**0.5),
         )  # [12 128 6 14 14]
         x_block0 = self.block0(attn_weights_c_head[0])
         x_block1 = self.block1(attn_weights_c_head[1])
@@ -194,13 +188,9 @@ class SDTR_cub(VisionTransformer):
                 n, c, h, w = feature_map.shape
                 cams = attn_weights.sum(1)[:, 0, 1:].reshape([n, h, w]).unsqueeze(1)
                 cams_at = cams
-                cams = cams * (
-                    feature_map + attn_out2.detach().clone()
-                )  # B * C * 14 * 14
-                cams = cams[torch.arange(label.shape[0]), label.long(), ...].unsqueeze(
-                    1
-                )
-                
+                cams = cams * (feature_map + attn_out2.detach().clone())  # B * C * 14 * 14
+                cams = cams[torch.arange(label.shape[0]), label.long(), ...].unsqueeze(1)
+
                 self.dnc_logits = self.dnc_att_layer(
                     x=attn_out2,
                     m_out_feat=x_patch,
@@ -237,9 +227,7 @@ class SDTR_cub(VisionTransformer):
 
         attn_map_flatt = self.attn_map.flatten(1)
         atn_v, _ = attn_map_flatt.sort()  # small to large
-        atn_min = atn_v[:, int(attn_map_flatt.shape[1] * 0.25)].view( # sota
-            attn_map_flatt.shape[0], 1, 1
-        )
+        atn_min = atn_v[:, int(attn_map_flatt.shape[1] * 0.25)].view(attn_map_flatt.shape[0], 1, 1)  # sota
 
         self.attn_map = torch.where(
             self.attn_map > torch.ones_like(self.attn_map) * atn_min,
@@ -250,33 +238,23 @@ class SDTR_cub(VisionTransformer):
 
         map_loss = self.loss_mse(self.pre_map, pre_map_label)
 
-        loss, params = self.AutomaticWeightedLoss(
-            loss_x, loss_att, loss_area, map_loss, loss_dnc
-        )
+        loss, params = self.AutomaticWeightedLoss(loss_x, loss_att, loss_area, map_loss, loss_dnc)
         return (
-                loss,
-                params,
-                [loss_x, loss_att, loss_area, map_loss, loss_clip, loss_dnc],
-            )
+            loss,
+            params,
+            [loss_x, loss_att, loss_area, map_loss, loss_clip, loss_dnc],
+        )
 
 
-
-
-class SDTR_imnet(VisionTransformer):
+class CDTR_imnet(VisionTransformer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.head = nn.Conv2d(
-            self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1
-        )
+        self.head = nn.Conv2d(self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
 
         self.avgpool = nn.AdaptiveAvgPool2d(1)
 
-        self.att_layer = att_CNN.cnn(
-            72, self.num_classes, c_base=256
-        )
-        self.att_cls = nn.Conv2d(
-            self.num_classes, self.num_classes, kernel_size=1, padding=0, bias=False
-        )
+        self.att_layer = att_CNN.cnn(72, self.num_classes, c_base=256)
+        self.att_cls = nn.Conv2d(self.num_classes, self.num_classes, kernel_size=1, padding=0, bias=False)
 
         self.dnc_att_layer = sba_util.sba_module(
             in_channels=self.num_classes,
@@ -350,9 +328,7 @@ class SDTR_imnet(VisionTransformer):
         B = x.shape[0]
         x = self.patch_embed(x)
 
-        cls_tokens = self.cls_token.expand(
-            B, -1, -1
-        )  # stole cls_tokens impl from Phil Wang, thanks
+        cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         x = torch.cat((cls_tokens, x), dim=1)
         x = x + self.pos_embed
         x = self.pos_drop(x)
@@ -374,7 +350,7 @@ class SDTR_imnet(VisionTransformer):
         self.attn_map = self.attn_map.sum(1)[:, 0, 1:].reshape([-1, 14, 14])
 
         n, p, c = x_patch.shape
-        x_patch = torch.reshape(x_patch, [n, int(p ** 0.5), int(p ** 0.5), c])
+        x_patch = torch.reshape(x_patch, [n, int(p**0.5), int(p**0.5), c])
         x_patch = x_patch.permute([0, 3, 1, 2])
         x_patch = x_patch.contiguous()
         x_patch = self.head(x_patch)
@@ -385,17 +361,16 @@ class SDTR_imnet(VisionTransformer):
         attn_weights_c_merge = rearrange(
             attn_weights_c[..., 0, 1:],
             "h b m (hi wi) -> b (h m) hi wi",
-            hi=int(p ** 0.5),
+            hi=int(p**0.5),
         )  # [128 72 14 14]
         attn_out1 = self.att_layer(attn_weights_c_merge)
         attn_out2 = self.att_cls(attn_out1)
         attn_logits = self.avgpool(attn_out2).squeeze(3).squeeze(2)
 
-
         attn_weights_c_head = rearrange(
             attn_weights_c[..., 0, 1:],
             "h b m (hi wi) ->h b m hi wi",
-            hi=int(p ** 0.5),
+            hi=int(p**0.5),
         )  # [12 128 6 14 14]
         x_block0 = self.block0(attn_weights_c_head[0])
         x_block1 = self.block1(attn_weights_c_head[1])
@@ -440,9 +415,7 @@ class SDTR_imnet(VisionTransformer):
                 n, c, h, w = feature_map.shape
                 cams = attn_weights.sum(1)[:, 0, 1:].reshape([n, h, w]).unsqueeze(1)
                 cams_at = cams
-                cams = cams * (
-                    feature_map + attn_out2.detach().clone()
-                )  # B * C * 14 * 14
+                cams = cams * (feature_map + attn_out2.detach().clone())  # B * C * 14 * 14
                 cams = cams[torch.arange(label.shape[0]), label.long(), ...]
                 cams = self.normalize_feat(cams).unsqueeze(1)
 
@@ -465,9 +438,7 @@ class SDTR_imnet(VisionTransformer):
             feature_map = x_patch.detach().clone()  # B * C * 14 * 14
             n, c, h, w = feature_map.shape
             cams = attn_weights.sum(1)[:, 0, 1:].reshape([n, h, w]).unsqueeze(1)
-            cams = (
-                cams * (feature_map + attn_out2.detach().clone()) / 2.0
-            )  # B * C * 14 * 14
+            cams = cams * (feature_map + attn_out2.detach().clone()) / 2.0  # B * C * 14 * 14
 
             attn_weights_all = rearrange(
                 attn_weights_c_merge,
@@ -495,9 +466,7 @@ class SDTR_imnet(VisionTransformer):
 
         attn_map_flatt = self.attn_map.flatten(1)
         atn_v, _ = attn_map_flatt.sort()  # small to large
-        atn_min = atn_v[:, int(attn_map_flatt.shape[1] * 0.1)].view( # sota
-            attn_map_flatt.shape[0], 1, 1
-        )
+        atn_min = atn_v[:, int(attn_map_flatt.shape[1] * 0.1)].view(attn_map_flatt.shape[0], 1, 1)  # sota
 
         self.attn_map = torch.where(
             self.attn_map > torch.ones_like(self.attn_map) * atn_min,
@@ -510,15 +479,14 @@ class SDTR_imnet(VisionTransformer):
         # * self.pre_map  self.attn_map
         map_loss = self.loss_mse(self.pre_map, pre_map_label)
 
-        loss, params_loss = self.AutomaticWeightedLoss(
-            loss_x, loss_att, loss_area, map_loss, loss_dnc
-        )
+        loss, params_loss = self.AutomaticWeightedLoss(loss_x, loss_att, loss_area, map_loss, loss_dnc)
 
         return (
             loss,
             params_loss,
             [loss_x, loss_att, loss_area, map_loss, loss_clip, loss_dnc],
         )
+
 
 class AutomaticWeightedLoss(nn.Module):
     """automatically weighted multi-task loss
@@ -540,15 +508,13 @@ class AutomaticWeightedLoss(nn.Module):
     def forward(self, *x):
         loss_sum = 0
         for i, loss in enumerate(x):
-            loss_sum += 0.5 / (self.params[i] ** 2) * loss + torch.log(
-                1 + self.params[i] ** 2
-            )
+            loss_sum += 0.5 / (self.params[i] ** 2) * loss + torch.log(1 + self.params[i] ** 2)
         return loss_sum, self.params
 
 
 @register_model
-def deit_small_patch16_224_SDTR_cub(pretrained=False, **kwargs):
-    model = SDTR_cub(
+def deit_small_patch16_224_CDTR_cub(pretrained=False, **kwargs):
+    model = CDTR_cub(
         patch_size=16,
         embed_dim=384,
         depth=12,
@@ -563,8 +529,8 @@ def deit_small_patch16_224_SDTR_cub(pretrained=False, **kwargs):
 
 
 @register_model
-def deit_small_patch16_224_SDTR_imnet(pretrained=False, **kwargs):
-    model = SDTR_imnet(
+def deit_small_patch16_224_CDTR_imnet(pretrained=False, **kwargs):
+    model = CDTR_imnet(
         patch_size=16,
         embed_dim=384,
         depth=12,
